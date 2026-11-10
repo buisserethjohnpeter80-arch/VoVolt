@@ -19,9 +19,9 @@ void labelStyle(juce::Label& l, float size, bool bold, juce::Colour colour = ink
 VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
     : juce::AudioProcessorEditor(&p), processor(p)
 {
-    setSize(1024, 460);
+    setSize(1024, 560);
     setResizable(true, true);
-    setResizeLimits(820, 370, 1536, 690);
+    setResizeLimits(900, 500, 1536, 840);
 
     heading.setText("VoVolt", juce::dontSendNotification);
     labelStyle(heading, 32.0f, true, juce::Colours::white);
@@ -47,6 +47,9 @@ VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
     setup(toneLabel, "Tone");
     setup(mixLabel, "Mix");
     setup(outputLabel, "Output");
+    setup(lowCutLabel, "LOW CUT");
+    setup(thumpLabel, "THUMP");
+    setup(highCutLabel, "HIGH CUT");
 
     driveValue.setText("25%", juce::dontSendNotification);
     labelStyle(driveValue, 29.0f, true);
@@ -67,7 +70,7 @@ VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
     bypass.setLookAndFeel(&lookAndFeel);
     addAndMakeVisible(bypass);
 
-    for (auto* s : { &drive, &tone, &mix, &output })
+    for (auto* s : { &drive, &tone, &mix, &output, &lowCut, &thump, &highCut })
     {
         s->setLookAndFeel(&lookAndFeel);
         addAndMakeVisible(*s);
@@ -85,6 +88,23 @@ VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
     tone.setTextValueSuffix(" %");
     mix.setTextValueSuffix(" %");
     output.setTextValueSuffix(" dB");
+    lowCut.setSliderStyle(juce::Slider::LinearHorizontal);
+    lowCut.setTextBoxStyle(juce::Slider::TextBoxRight, false, 58, 22);
+    lowCut.setTextValueSuffix(" Hz");
+    thump.setSliderStyle(juce::Slider::LinearHorizontal);
+    thump.setTextBoxStyle(juce::Slider::TextBoxRight, false, 48, 22);
+    thump.setTextValueSuffix(" %");
+    thump.textFromValueFunction = [](double value) { return juce::String(juce::roundToInt(value * 100.0)); };
+    thump.valueFromTextFunction = [](const juce::String& text) { return juce::jlimit(0.0, 1.0, text.getDoubleValue() / 100.0); };
+    highCut.setSliderStyle(juce::Slider::LinearHorizontal);
+    highCut.setTextBoxStyle(juce::Slider::TextBoxRight, false, 65, 22);
+    highCut.setTextValueSuffix(" Hz");
+    for (auto* b : { &punish, &steep, &autoGain })
+    {
+        b->setClickingTogglesState(true);
+        b->setLookAndFeel(&lookAndFeel);
+        addAndMakeVisible(*b);
+    }
     tone.textFromValueFunction = [](double value) { return juce::String(juce::roundToInt((value - 0.5) * 200.0)) + "%"; };
     tone.valueFromTextFunction = [](const juce::String& s) { return juce::jlimit(0.0, 1.0, s.getDoubleValue() / 200.0 + 0.5); };
     driveAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "drive", drive);
@@ -92,6 +112,12 @@ VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
     mixAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "mix", mix);
     outputAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "output", output);
     bypassAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters, "bypass", bypass);
+    lowCutAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "lowCut", lowCut);
+    thumpAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "thump", thump);
+    highCutAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "highCut", highCut);
+    punishAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters, "punish", punish);
+    steepAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters, "steep", steep);
+    autoGainAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters, "autoGain", autoGain);
     startTimerHz(30);
     timerCallback();
 }
@@ -99,11 +125,13 @@ VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
 VoVoltAudioProcessorEditor::~VoVoltAudioProcessorEditor()
 {
     stopTimer();
+    autoGainAttach.reset(); steepAttach.reset(); punishAttach.reset();
+    highCutAttach.reset(); thumpAttach.reset(); lowCutAttach.reset();
     bypassAttach.reset();
     outputAttach.reset(); mixAttach.reset(); toneAttach.reset(); driveAttach.reset();
     for (auto& b : modes) b.setLookAndFeel(nullptr);
-    bypass.setLookAndFeel(nullptr);
-    for (auto* s : { &drive, &tone, &mix, &output }) s->setLookAndFeel(nullptr);
+    for (auto* b : { &bypass, &punish, &steep, &autoGain }) b->setLookAndFeel(nullptr);
+    for (auto* s : { &drive, &tone, &mix, &output, &lowCut, &thump, &highCut }) s->setLookAndFeel(nullptr);
 }
 
 void VoVoltAudioProcessorEditor::setCharacter(int index)
@@ -132,8 +160,11 @@ void VoVoltAudioProcessorEditor::timerCallback()
         }
     }
     driveValue.setText(juce::String(juce::roundToInt(drive.getValue() * 100.0)) + "%", juce::dontSendNotification);
-    bypass.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
-    bypass.setColour(juce::TextButton::textColourOffId, ink);
+    for (auto* b : { &bypass, &punish, &steep, &autoGain })
+    {
+        b->setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+        b->setColour(juce::TextButton::textColourOffId, ink);
+    }
     repaint();
 }
 
@@ -171,12 +202,12 @@ void VoVoltAudioProcessorEditor::paintMeter(juce::Graphics& g, float x, float y,
 void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
 {
     juce::ColourGradient background(juce::Colour(0xfff2f9ff), 0.0f, 80.0f,
-                                    juce::Colour(0xffd8e9fa), 0.0f, 460.0f, false);
+                                    juce::Colour(0xffd8e9fa), 0.0f, 560.0f, false);
     g.setGradientFill(background);
     g.fillAll();
 
     const float sx = static_cast<float>(getWidth()) / 1024.0f;
-    const float sy = static_cast<float>(getHeight()) / 460.0f;
+    const float sy = static_cast<float>(getHeight()) / 560.0f;
     juce::Graphics::ScopedSaveState saved(g);
     g.addTransform(juce::AffineTransform::scale(sx, sy));
     g.setColour(navy);
@@ -204,7 +235,7 @@ void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
 void VoVoltAudioProcessorEditor::resized()
 {
     const float sx = static_cast<float>(getWidth()) / 1024.0f;
-    const float sy = static_cast<float>(getHeight()) / 460.0f;
+    const float sy = static_cast<float>(getHeight()) / 560.0f;
     auto place = [sx, sy](juce::Component& c, int x, int y, int w, int h)
     {
         c.setBounds(juce::roundToInt(x * sx), juce::roundToInt(y * sy),
@@ -219,12 +250,21 @@ void VoVoltAudioProcessorEditor::resized()
     place(drive, 399, 128, 225, 229);
     place(driveLabel, 466, 223, 93, 30);
     place(driveValue, 459, 255, 109, 46);
-    place(toneLabel, 135, 322, 220, 30);
-    place(tone, 133, 362, 310, 54);
-    place(mixLabel, 671, 137, 205, 35);
+    place(toneLabel, 115, 345, 220, 28);
+    place(tone, 105, 377, 285, 48);
+    place(mixLabel, 672, 137, 205, 35);
     place(mix, 658, 190, 256, 54);
     place(outputLabel, 666, 320, 220, 35);
     place(output, 654, 363, 262, 54);
+    place(lowCutLabel, 35, 468, 150, 22);
+    place(lowCut, 25, 490, 165, 38);
+    place(thumpLabel, 205, 468, 130, 22);
+    place(thump, 195, 490, 150, 38);
+    place(punish, 360, 490, 112, 38);
+    place(highCutLabel, 485, 468, 145, 22);
+    place(highCut, 475, 490, 165, 38);
+    place(steep, 655, 490, 105, 38);
+    place(autoGain, 775, 490, 150, 38);
 }
 
 juce::AudioProcessorEditor* VoVoltAudioProcessor::createEditor()
