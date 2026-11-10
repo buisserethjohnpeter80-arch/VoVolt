@@ -38,8 +38,12 @@ private:
                       float& inputPeak, float& outputPeak) noexcept;
 
     juce::LinearSmoothedValue<float> driveSmoothed, mixSmoothed, toneSmoothed, outputSmoothed, bypassSmoothed;
+    juce::LinearSmoothedValue<float> lowCutSmoothed, thumpSmoothed, highCutSmoothed, punishSmoothed, autoGainSmoothed, steepSmoothed;
     std::vector<std::array<vovolt::ChannelState, 4>> characterState;
     std::vector<float> toneState, dcPreviousInput, dcPreviousOutput;
+    std::vector<float> preCutPreviousInput, preCutPreviousOutput, thumpState;
+    std::vector<float> highCutState1, highCutState2;
+    float linkedDryRms = 1.0e-8f, linkedWetRms = 1.0e-8f, linkedAutoGain = 1.0f;
     juce::AudioBuffer<float> dryCopy;
     int preparedBlockSize = 0;
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
@@ -47,6 +51,7 @@ private:
     size_t delayPosition = 0;
     int delaySize = 1;
     float dcCoefficient = 0.0f;
+    float autoGainAttack = 0.0f, autoGainRelease = 0.0f, autoGainSmoothing = 0.0f;
     vovolt::Character activeCharacter = vovolt::Character::tube;
     std::array<float, 4> characterWeights { 0.0f, 1.0f, 0.0f, 0.0f };
     float characterSmoothingCoeff = 0.0f;
