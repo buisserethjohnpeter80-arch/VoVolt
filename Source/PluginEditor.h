@@ -1,6 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
+#include "VoVoltLookAndFeel.h"
+#include <array>
 
 class VoVoltAudioProcessorEditor final : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -12,11 +14,14 @@ public:
 private:
     void timerCallback() override;
     void setCharacter(int index);
+    void paintMeter(juce::Graphics&, float x, float y, float level, const juce::String& label) const;
     VoVoltAudioProcessor& processor;
+    VoVoltLookAndFeel lookAndFeel;
     juce::Slider drive, tone, mix, output;
-    juce::Label driveLabel, toneLabel, mixLabel, outputLabel, heading, subtitle, characterLabel;
+    juce::Label heading, subtitle, characterLabel, driveLabel, toneLabel, mixLabel, outputLabel;
+    juce::Label presetName, driveValue;
     std::array<juce::TextButton, 4> modes;
-    juce::ToggleButton bypass { "BYPASS" };
+    juce::TextButton bypass { "BYPASS" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> driveAttach, toneAttach, mixAttach, outputAttach;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttach;
     float inMeter = 0.0f, outMeter = 0.0f;
