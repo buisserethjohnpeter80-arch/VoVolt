@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
 #include <cmath>
 
 VoVoltAudioProcessor::VoVoltAudioProcessor()
@@ -11,6 +12,7 @@ VoVoltAudioProcessor::VoVoltAudioProcessor()
 
 juce::AudioProcessorValueTreeState::ParameterLayout VoVoltAudioProcessor::createLayout()
 {
+    // Keep the IDs, ranges, order and defaults identical to v0.1 for preset compatibility.
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
     layout.add(std::make_unique<juce::AudioParameterChoice>(juce::ParameterID{"character", 1}, "Character",
         juce::StringArray{"Soft", "Tube", "Tape", "Hard"}, 1));
@@ -38,24 +40,30 @@ void VoVoltAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     const int channels = juce::jmax(1, getTotalNumInputChannels());
     preparedBlockSize = juce::jmax(1, samplesPerBlock);
     dryCopy.setSize(channels, preparedBlockSize, false, true, false);
-    // Two oversampling stages = 4x; polyphase IIR with host latency reporting.
+
     oversampler = std::make_unique<juce::dsp::Oversampling<float>>(
         static_cast<size_t>(channels), 2,
         juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true);
-    oversampler->initProcessing(static_cast<size_t>(juce::jmax(1, samplesPerBlock)));
+    oversampler->initProcessing(static_cast<size_t>(preparedBlockSize));
     oversampler->reset();
-    latencySamples = oversampler->getLatencyInSamples();
-    setLatencySamples(static_cast<int>(std::round(latencySamples)));
-
-    // Dry path delay must match the reported integer host latency.
+    // useIntegerLatency=true: keeps wet/dry delay sample-aligned at host rate.
+    setLatencySamples(juce::roundToInt(oversampler->getLatencyInSamples()));
     delaySize = juce::jmax(1, getLatencySamples());
     dryDelay.assign(static_cast<size_t>(channels), std::vector<float>(static_cast<size_t>(delaySize), 0.0f));
     delayPosition = 0;
-    tapeState.assign(static_cast<size_t>(channels), 0.0f);
-    toneState.assign(static_cast<size_t>(channels), 0.0f);
 
-    driveSmoothed.reset(sampleRate * 4.0, 0.025);
-    toneSmoothed.reset(sampleRate * 4.0, 0.025);
+    const float internalRate = static_cast<float>(sampleRate * 4.0);
+    characterState.resize(static_cast<size_t>(channels));
+    for (auto& stateByCharacter : characterState)
+        for (auto& state : stateByCharacter)
+            state.prepare(internalRate);
+    toneState.assign(static_cast<size_t>(channels), 0.0f);
+    dcPreviousInput.assign(static_cast<size_t>(channels), 0.0f);
+    dcPreviousOutput.assign(static_cast<size_t>(channels), 0.0f);
+    dcCoefficient = std::exp(-2.0f * juce::MathConstants<float>::pi * 8.0f / internalRate);
+
+    driveSmoothed.reset(internalRate, 0.025);
+    toneSmoothed.reset(internalRate, 0.025);
     mixSmoothed.reset(sampleRate, 0.025);
     outputSmoothed.reset(sampleRate, 0.025);
     bypassSmoothed.reset(sampleRate, 0.025);
@@ -64,6 +72,14 @@ void VoVoltAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
     toneSmoothed.setCurrentAndTargetValue(parameters.getRawParameterValue("tone")->load());
     outputSmoothed.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(parameters.getRawParameterValue("output")->load()));
     bypassSmoothed.setCurrentAndTargetValue(parameters.getRawParameterValue("bypass")->load());
+
+    activeCharacter = static_cast<vovolt::Character>(juce::jlimit(0, 3,
+        static_cast<int>(parameters.getRawParameterValue("character")->load())));
+    characterWeights.fill(0.0f);
+    characterWeights[static_cast<size_t>(activeCharacter)] = 1.0f;
+    characterSmoothingCoeff = 1.0f - std::exp(-1.0f / (0.006f * internalRate));
+    inputLevel.store(0.0f, std::memory_order_relaxed);
+    outputLevel.store(0.0f, std::memory_order_relaxed);
 }
 
 void VoVoltAudioProcessor::releaseResources()
@@ -71,8 +87,10 @@ void VoVoltAudioProcessor::releaseResources()
     oversampler.reset();
     dryDelay.clear();
     dryCopy.setSize(0, 0);
-    tapeState.clear();
+    characterState.clear();
     toneState.clear();
+    dcPreviousInput.clear();
+    dcPreviousOutput.clear();
 }
 
 void VoVoltAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -80,73 +98,104 @@ void VoVoltAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::
     juce::ScopedNoDenormals noDenormals;
     const int n = buffer.getNumSamples();
     const int channels = juce::jmin(buffer.getNumChannels(), getTotalNumInputChannels());
-    for (int c = channels; c < buffer.getNumChannels(); ++c) buffer.clear(c, 0, n);
-    if (n <= 0 || channels <= 0 || !oversampler) return;
-    if (n > preparedBlockSize) return; // Fail safe, preserve original audio.
-    for (int c = 0; c < channels; ++c)
-        dryCopy.copyFrom(c, 0, buffer, c, 0, n);
+    for (int c = channels; c < buffer.getNumChannels(); ++c)
+        buffer.clear(c, 0, n);
+    if (n <= 0 || channels <= 0 || !oversampler || preparedBlockSize <= 0)
+        return;
 
     driveSmoothed.setTargetValue(parameters.getRawParameterValue("drive")->load());
     mixSmoothed.setTargetValue(parameters.getRawParameterValue("mix")->load());
     toneSmoothed.setTargetValue(parameters.getRawParameterValue("tone")->load());
     outputSmoothed.setTargetValue(juce::Decibels::decibelsToGain(parameters.getRawParameterValue("output")->load()));
     bypassSmoothed.setTargetValue(parameters.getRawParameterValue("bypass")->load());
-    const auto mode = static_cast<vovolt::Character>(juce::jlimit(0, 3,
+    const auto requested = static_cast<vovolt::Character>(juce::jlimit(0, 3,
         static_cast<int>(parameters.getRawParameterValue("character")->load())));
+    activeCharacter = requested; // Weights interpolate without restarting a crossfade.
 
+    float inputPeak = 0.0f, outputPeak = 0.0f;
+    for (int start = 0; start < n; start += preparedBlockSize)
+        processChunk(buffer, start, juce::jmin(preparedBlockSize, n - start), channels, inputPeak, outputPeak);
+    inputLevel.store(inputPeak, std::memory_order_relaxed);
+    outputLevel.store(outputPeak, std::memory_order_relaxed);
+}
 
-    float inPeak = 0.0f;
+void VoVoltAudioProcessor::processChunk(juce::AudioBuffer<float>& buffer, int start, int count,
+                                         int channels, float& inputPeak, float& outputPeak) noexcept
+{
     for (int c = 0; c < channels; ++c)
-        inPeak = juce::jmax(inPeak, buffer.getMagnitude(c, 0, n));
+    {
+        // Reject poisoned host samples BEFORE oversampling filter state sees them.
+        float* samples = buffer.getWritePointer(c, start);
+        for (int i = 0; i < count; ++i)
+            if (!std::isfinite(samples[i]))
+                samples[i] = 0.0f;
+        dryCopy.copyFrom(c, 0, buffer, c, start, count);
+        inputPeak = juce::jmax(inputPeak, buffer.getMagnitude(c, start, count));
+    }
 
-    // Input copied to preallocated dryCopy before oversampling.
-    juce::dsp::AudioBlock<float> block(buffer);
+    juce::dsp::AudioBlock<float> fullBlock(buffer);
+    auto block = fullBlock.getSubBlock(static_cast<size_t>(start), static_cast<size_t>(count));
     auto up = oversampler->processSamplesUp(block);
     const size_t upN = up.getNumSamples();
-    const float oversampleFactor = static_cast<float>(upN) / static_cast<float>(n);
-    const float baseRate = static_cast<float>(getSampleRate());
-    const float fs = juce::jmax(1.0f, baseRate * oversampleFactor);
-    // Tone controls the one-pole lowpass cutoff of the saturated branch, 3kHz-18kHz.
+    const float internalRate = static_cast<float>(getSampleRate() * 4.0);
+
     for (size_t i = 0; i < upN; ++i)
     {
         const float drive = driveSmoothed.getNextValue();
         const float tone = toneSmoothed.getNextValue();
         const float cutoff = 3000.0f + 15000.0f * tone;
-        const float a = std::exp(-2.0f * juce::MathConstants<float>::pi * cutoff / fs);
+        const float filterCoeff = std::exp(-2.0f * juce::MathConstants<float>::pi * cutoff / internalRate);
+        // A one-pole equal-gain transition handles fast repeated character changes
+        // without resetting a 2-character crossfade and causing an audible jump.
+        for (size_t modeIndex = 0; modeIndex < characterWeights.size(); ++modeIndex)
+        {
+            const float target = modeIndex == static_cast<size_t>(activeCharacter) ? 1.0f : 0.0f;
+            characterWeights[modeIndex] += characterSmoothingCoeff * (target - characterWeights[modeIndex]);
+        }
         for (int c = 0; c < channels; ++c)
         {
             auto* ptr = up.getChannelPointer(static_cast<size_t>(c));
-            const float shaped = vovolt::VoltCore::shape(ptr[i], mode, drive, tapeState[static_cast<size_t>(c)]);
-            float& state = toneState[static_cast<size_t>(c)];
-            state = (1.0f - a) * shaped + a * state;
-            ptr[i] = state;
+            const float input = ptr[i];
+            auto& modes = characterState[static_cast<size_t>(c)];
+            float wet = 0.0f;
+            for (size_t modeIndex = 0; modeIndex < characterWeights.size(); ++modeIndex)
+            {
+                const float weight = characterWeights[modeIndex];
+                if (weight > 0.00001f)
+                    wet += weight * vovolt::VoltCore::shape(
+                        input, static_cast<vovolt::Character>(modeIndex), drive, modes[modeIndex]);
+            }
+            // Existing Tone control retained, followed by a gentle DC blocker.
+            float& lowpass = toneState[static_cast<size_t>(c)];
+            lowpass = (1.0f - filterCoeff) * wet + filterCoeff * lowpass;
+            const float hp = lowpass - dcPreviousInput[static_cast<size_t>(c)]
+                + dcCoefficient * dcPreviousOutput[static_cast<size_t>(c)];
+            dcPreviousInput[static_cast<size_t>(c)] = lowpass;
+            dcPreviousOutput[static_cast<size_t>(c)] = hp;
+            ptr[i] = hp;
         }
     }
     oversampler->processSamplesDown(block);
 
-    // Delay the dry branch to align with the oversampled wet branch.
-    float outPeak = 0.0f;
-    for (int i = 0; i < n; ++i)
+    for (int i = 0; i < count; ++i)
     {
         const float mix = mixSmoothed.getNextValue();
         const float output = outputSmoothed.getNextValue();
         const float bypass = bypassSmoothed.getNextValue();
         for (int c = 0; c < channels; ++c)
         {
-            const float wet = buffer.getSample(c, i);
+            const float wet = buffer.getSample(c, start + i);
             const float dry = dryCopy.getSample(c, i);
             auto& ring = dryDelay[static_cast<size_t>(c)];
             const float delayed = getLatencySamples() == 0 ? dry : ring[delayPosition];
             ring[delayPosition] = dry;
             const float mixed = delayed + (wet - delayed) * mix;
             const float value = mixed * output * (1.0f - bypass) + delayed * bypass;
-            buffer.setSample(c, i, value);
-            outPeak = juce::jmax(outPeak, std::abs(value));
+            buffer.setSample(c, start + i, value);
+            outputPeak = juce::jmax(outputPeak, std::abs(value));
         }
         delayPosition = (delayPosition + 1) % static_cast<size_t>(delaySize);
     }
-    inputLevel.store(inPeak, std::memory_order_relaxed);
-    outputLevel.store(outPeak, std::memory_order_relaxed);
 }
 
 void VoVoltAudioProcessor::getStateInformation(juce::MemoryBlock& dest)
@@ -154,6 +203,7 @@ void VoVoltAudioProcessor::getStateInformation(juce::MemoryBlock& dest)
     auto xml = parameters.copyState().createXml();
     copyXmlToBinary(*xml, dest);
 }
+
 void VoVoltAudioProcessor::setStateInformation(const void* data, int size)
 {
     if (auto xml = getXmlFromBinary(data, size))
