@@ -58,8 +58,12 @@ struct VoltCore
         {
             case Character::soft:
             {
-                const float gain = 0.85f + 12.0f * d;
-                const float saturated = std::tanh(gain * x) / std::tanh(gain);
+                // Unity small-signal gain: tanh(g*x)/g has a derivative of 1 at x=0.
+                // The previous /tanh(g) normalization boosted quiet material as Drive rose,
+                // which made level-matched A/B comparisons misleading. This curve keeps
+                // low-level gain near unity while progressively rounding larger peaks.
+                const float gain = 1.0f + 3.5f * d;
+                const float saturated = std::tanh(gain * x) / gain;
                 return x + d * (saturated - x);
             }
             case Character::hard:
