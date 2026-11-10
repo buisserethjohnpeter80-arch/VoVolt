@@ -233,7 +233,7 @@ int main()
         testSegmentationIndependence();
         testHarmonicContent();
         testInvalidInputRecovery();
-        std::cout << "VoVolt DSP v0.4: 10 test groups passed\n";
+        std::cout << "VoVolt DSP core v0.5-dev: 10 test groups passed\n";
         return 0;
     }
     catch (const std::exception& e)
