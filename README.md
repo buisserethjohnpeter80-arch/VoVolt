@@ -11,7 +11,7 @@ VoVolt is an independent C++20 / JUCE 8.0.8 saturation plugin, **not part of MEL
 - Fixed 4x oversampling using JUCE's polyphase IIR, host-reported integer latency, preallocated aligned dry delay and DC removal on wet path.
 - Process blocks larger than the prepared block size via **chunking**, without realtime allocations.
 - JUCE APVTS DAW parameter automation and state recall, mono/stereo routing and level meters.
-- Nine standalone C++ DSP test groups, plus Windows GitHub Actions build and CTest.
+- Ten standalone C++ DSP test groups, plus Windows GitHub Actions build and CTest.
 
 ## Build (Windows)
 
@@ -29,7 +29,7 @@ You can also use GitHub Actions: `.github/workflows/windows.yml` uploads the VST
 
 ## What is tested vs. untested
 
-**Actually tested in the supplied environment:** JUCE-independent DSP core, 9 groups, with GCC C++20 in both optimized and `-DNDEBUG` builds. Additional AddressSanitizer/UndefinedBehaviorSanitizer run is performed for core tests.
+**Actually tested in the supplied environment:** JUCE-independent DSP core, 10 groups, with GCC C++20 in both optimized and `-DNDEBUG` builds. Additional AddressSanitizer/UndefinedBehaviorSanitizer run is performed for core tests.
 
 **NOT tested here:** actual JUCE/VST3 compilation on Windows, sound quality in FL Studio, oversampler dry/wet latency impulse alignment, CPU under host load, extreme automation, and plugin scan/installation. Run Windows CI and host verification before any release claim.
 
@@ -43,4 +43,4 @@ You can also use GitHub Actions: `.github/workflows/windows.yml` uploads the VST
 - When Bypass is enabled, Output is not applied to the bypassed dry path (same behaviour as v0.1).
 - Host latency is held constant by JUCE's `useIntegerLatency` option; verify with impulses/phase cancellation before shipping.
 
-Read `docs/V04_DSP_REPORT.md` for change notes and test checklist, and `docs/MUSE_HANDOFF.md` for the next CI and FL Studio validation steps.
+Read `docs/V04_DSP_REPORT.md` for change notes and test checklist, `docs/V04_SOFT_CALIBRATION.md` for the first SOFT calibration, and `docs/MUSE_HANDOFF.md` for the next CI and FL Studio validation steps.
