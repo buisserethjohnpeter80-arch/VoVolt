@@ -68,6 +68,30 @@ void testOddSymmetricModes()
                   "Soft and Hard must be odd-symmetric");
 }
 
+void testSoftUnityGainAndCompression()
+{
+    using namespace vovolt;
+    for (float drive : {0.25f, 0.5f, 0.75f, 1.0f})
+    {
+        const float smallInput = 0.001f;
+        const float smallOutput = measure(Character::soft, smallInput, drive);
+        check(std::abs((smallOutput / smallInput) - 1.0f) < 0.001f,
+              "Soft must not boost small-signal gain");
+
+        const float medium = measure(Character::soft, 0.25f, drive);
+        const float large = measure(Character::soft, 0.75f, drive);
+        check(medium > 0.0f && large > medium,
+              "Soft transfer must remain monotonic for positive input");
+        check(large < 0.75f,
+              "Soft must progressively round larger peaks without positive gain");
+    }
+
+    const float atLowDrive = measure(Character::soft, 0.45f, 0.25f);
+    const float atHighDrive = measure(Character::soft, 0.45f, 0.75f);
+    check(atHighDrive < atLowDrive,
+          "Increasing Soft Drive must increase peak compression");
+}
+
 void testHardKnee()
 {
     using namespace vovolt;
@@ -202,13 +226,14 @@ int main()
         testDriveZero();
         testFiniteRanges();
         testOddSymmetricModes();
+        testSoftUnityGainAndCompression();
         testHardKnee();
         testTubeAsymmetry();
         testTapeStateAndRate();
         testSegmentationIndependence();
         testHarmonicContent();
         testInvalidInputRecovery();
-        std::cout << "VoVolt DSP v0.4: 9 test groups passed\n";
+        std::cout << "VoVolt DSP v0.4: 10 test groups passed\n";
         return 0;
     }
     catch (const std::exception& e)
