@@ -1,168 +1,230 @@
 #include "PluginEditor.h"
+#include <cmath>
 
 namespace
 {
-const juce::Colour navy(0xff182c40), blue(0xff188afa), ink(0xff142c4a), light(0xffe9f4ff);
-void styleSlider(juce::Slider& slider, bool rotary)
+const auto navy = juce::Colour(0xff172a40);
+const auto ink = juce::Colour(0xff142b47);
+const auto blue = juce::Colour(0xff1589f8);
+
+void labelStyle(juce::Label& l, float size, bool bold, juce::Colour colour = ink)
 {
-    slider.setSliderStyle(rotary ? juce::Slider::RotaryHorizontalVerticalDrag : juce::Slider::LinearHorizontal);
-    slider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, rotary ? 90 : 100, 24);
-    slider.setColour(juce::Slider::thumbColourId, blue);
-    slider.setColour(juce::Slider::rotarySliderFillColourId, blue);
-    slider.setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xffbed2e8));
-    slider.setColour(juce::Slider::trackColourId, blue);
-    slider.setColour(juce::Slider::backgroundColourId, juce::Colour(0xffbed2e8));
-    slider.setColour(juce::Slider::textBoxTextColourId, ink);
-    slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-}
-void styleLabel(juce::Label& label, float size, bool bold = false)
-{
-    label.setFont(juce::Font(juce::FontOptions(size, bold ? juce::Font::bold : juce::Font::plain)));
-    label.setColour(juce::Label::textColourId, ink);
-    label.setJustificationType(juce::Justification::centred);
+    l.setFont(juce::Font(juce::FontOptions(size, bold ? juce::Font::bold : juce::Font::plain)));
+    l.setColour(juce::Label::textColourId, colour);
+    l.setJustificationType(juce::Justification::centred);
+    l.setInterceptsMouseClicks(false, false);
 }
 }
 
 VoVoltAudioProcessorEditor::VoVoltAudioProcessorEditor(VoVoltAudioProcessor& p)
-    : AudioProcessorEditor(&p), processor(p)
+    : juce::AudioProcessorEditor(&p), processor(p)
 {
-    setSize(960, 430);
+    setSize(1024, 460);
     setResizable(true, true);
-    setResizeLimits(760, 350, 1440, 645);
+    setResizeLimits(820, 370, 1536, 690);
 
     heading.setText("VoVolt", juce::dontSendNotification);
-    styleLabel(heading, 30.0f, true);
-    heading.setColour(juce::Label::textColourId, juce::Colours::white);
+    labelStyle(heading, 32.0f, true, juce::Colours::white);
     heading.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(heading);
-    subtitle.setText("VOCAL SATURATION", juce::dontSendNotification);
-    styleLabel(subtitle, 13.0f);
-    subtitle.setColour(juce::Label::textColourId, juce::Colour(0xffbcd7f2));
+
+    subtitle.setText("Vocal Saturation", juce::dontSendNotification);
+    labelStyle(subtitle, 16.0f, false, juce::Colour(0xffd3e4f6));
     addAndMakeVisible(subtitle);
 
-    characterLabel.setText("CHARACTER", juce::dontSendNotification);
-    styleLabel(characterLabel, 17.0f, true);
-    addAndMakeVisible(characterLabel);
-    const char* names[] = {"SOFT", "TUBE", "TAPE", "HARD"};
+    presetName.setText("DEFAULT", juce::dontSendNotification);
+    labelStyle(presetName, 16.0f, true, juce::Colours::white);
+    addAndMakeVisible(presetName);
+
+    auto setup = [this](juce::Label& l, const char* title)
+    {
+        l.setText(title, juce::dontSendNotification);
+        labelStyle(l, 18.0f, true);
+        addAndMakeVisible(l);
+    };
+    setup(characterLabel, "Character");
+    setup(driveLabel, "DRIVE");
+    setup(toneLabel, "Tone");
+    setup(mixLabel, "Mix");
+    setup(outputLabel, "Output");
+
+    driveValue.setText("25%", juce::dontSendNotification);
+    labelStyle(driveValue, 29.0f, true);
+    addAndMakeVisible(driveValue);
+
+    const char* names[] = { "SOFT", "TUBE", "TAPE", "HARD" };
     for (int i = 0; i < 4; ++i)
     {
-        modes[static_cast<size_t>(i)].setButtonText(names[i]);
-        modes[static_cast<size_t>(i)].onClick = [this, i] { setCharacter(i); };
-        addAndMakeVisible(modes[static_cast<size_t>(i)]);
+        auto& b = modes[static_cast<size_t>(i)];
+        b.setButtonText(names[i]);
+        b.setClickingTogglesState(false);
+        b.onClick = [this, i] { setCharacter(i); };
+        b.setLookAndFeel(&lookAndFeel);
+        addAndMakeVisible(b);
     }
 
-    for (auto* s : {&drive, &tone, &mix, &output}) addAndMakeVisible(*s);
-    styleSlider(drive, true);
-    styleSlider(tone, false);
-    styleSlider(mix, false);
-    styleSlider(output, false);
-    drive.setTextValueSuffix(" %");
+    bypass.setClickingTogglesState(true);
+    bypass.setLookAndFeel(&lookAndFeel);
+    addAndMakeVisible(bypass);
+
+    for (auto* s : { &drive, &tone, &mix, &output })
+    {
+        s->setLookAndFeel(&lookAndFeel);
+        addAndMakeVisible(*s);
+        s->setColour(juce::Slider::textBoxTextColourId, ink);
+        s->setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    }
+    drive.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    drive.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    drive.setDoubleClickReturnValue(true, 0.25);
+    for (auto* s : { &tone, &mix, &output })
+    {
+        s->setSliderStyle(juce::Slider::LinearHorizontal);
+        s->setTextBoxStyle(juce::Slider::TextBoxRight, false, 83, 25);
+    }
     tone.setTextValueSuffix(" %");
     mix.setTextValueSuffix(" %");
     output.setTextValueSuffix(" dB");
-
-    auto setup = [this](juce::Label& l, const char* text)
-    {
-        l.setText(text, juce::dontSendNotification);
-        styleLabel(l, 17.0f, true);
-        addAndMakeVisible(l);
-    };
-    setup(driveLabel, "DRIVE");
-    setup(toneLabel, "TONE");
-    setup(mixLabel, "MIX");
-    setup(outputLabel, "OUTPUT");
-
+    tone.textFromValueFunction = [](double value) { return juce::String(juce::roundToInt((value - 0.5) * 200.0)) + "%"; };
+    tone.valueFromTextFunction = [](const juce::String& s) { return juce::jlimit(0.0, 1.0, s.getDoubleValue() / 200.0 + 0.5); };
     driveAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "drive", drive);
     toneAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "tone", tone);
     mixAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "mix", mix);
     outputAttach = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(p.parameters, "output", output);
     bypassAttach = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(p.parameters, "bypass", bypass);
-    bypass.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
-    addAndMakeVisible(bypass);
-    startTimerHz(25);
+    startTimerHz(30);
+    timerCallback();
 }
 
-VoVoltAudioProcessorEditor::~VoVoltAudioProcessorEditor() { stopTimer(); }
+VoVoltAudioProcessorEditor::~VoVoltAudioProcessorEditor()
+{
+    stopTimer();
+    bypassAttach.reset();
+    outputAttach.reset(); mixAttach.reset(); toneAttach.reset(); driveAttach.reset();
+    for (auto& b : modes) b.setLookAndFeel(nullptr);
+    bypass.setLookAndFeel(nullptr);
+    for (auto* s : { &drive, &tone, &mix, &output }) s->setLookAndFeel(nullptr);
+}
 
 void VoVoltAudioProcessorEditor::setCharacter(int index)
 {
-    if (auto* param = processor.parameters.getParameter("character"))
+    if (auto* parameter = processor.parameters.getParameter("character"))
     {
-        param->beginChangeGesture();
-        param->setValueNotifyingHost(static_cast<float>(index) / 3.0f);
-        param->endChangeGesture();
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost(static_cast<float>(index) / 3.0f);
+        parameter->endChangeGesture();
     }
 }
 
 void VoVoltAudioProcessorEditor::timerCallback()
 {
-    inMeter = juce::jmax(processor.inputLevel.load(std::memory_order_relaxed), inMeter * 0.88f);
-    outMeter = juce::jmax(processor.outputLevel.load(std::memory_order_relaxed), outMeter * 0.88f);
-    const int selected = juce::jlimit(0, 3, static_cast<int>(processor.parameters.getRawParameterValue("character")->load()));
-    for (int i = 0; i < 4; ++i)
+    inMeter = juce::jmax(processor.inputLevel.load(std::memory_order_relaxed), inMeter * 0.87f);
+    outMeter = juce::jmax(processor.outputLevel.load(std::memory_order_relaxed), outMeter * 0.87f);
+    if (auto* parameter = processor.parameters.getRawParameterValue("character"))
     {
-        auto& b = modes[static_cast<size_t>(i)];
-        b.setColour(juce::TextButton::buttonColourId, i == selected ? blue : juce::Colour(0xffd5e7f8));
-        b.setColour(juce::TextButton::textColourOffId, i == selected ? juce::Colours::white : ink);
+        const int selected = juce::jlimit(0, 3, static_cast<int>(std::lround(parameter->load())));
+        for (int i = 0; i < 4; ++i)
+        {
+            auto& b = modes[static_cast<size_t>(i)];
+            b.setToggleState(i == selected, juce::dontSendNotification);
+            b.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+            b.setColour(juce::TextButton::textColourOffId, ink);
+        }
     }
+    driveValue.setText(juce::String(juce::roundToInt(drive.getValue() * 100.0)) + "%", juce::dontSendNotification);
+    bypass.setColour(juce::TextButton::textColourOnId, juce::Colours::white);
+    bypass.setColour(juce::TextButton::textColourOffId, ink);
     repaint();
+}
+
+void VoVoltAudioProcessorEditor::paintMeter(juce::Graphics& g, float x, float y, float level,
+                                            const juce::String& label) const
+{
+    const float height = 190.0f;
+    const float fraction = juce::jlimit(0.0f, 1.0f, level);
+    g.setColour(ink);
+    g.setFont(juce::FontOptions(16.0f));
+    g.drawText(label, juce::Rectangle<float>(x - 10.0f, y - 37.0f, 56.0f, 30.0f), juce::Justification::centred);
+    for (int i = 0; i < 2; ++i)
+    {
+        const float xx = x + static_cast<float>(i) * 16.0f;
+        g.setColour(juce::Colour(0xffa8bdd5));
+        g.fillRoundedRectangle(xx, y, 12.0f, height, 6.0f);
+        if (fraction > 0.0f)
+        {
+            const float fillHeight = height * fraction;
+            const auto green = juce::Colour(0xff0acb87);
+            const auto yellow = juce::Colour(0xfff6d548);
+            juce::ColourGradient grad(yellow, xx, y, green, xx, y + height, false);
+            g.setGradientFill(grad);
+            g.fillRoundedRectangle(xx, y + height - fillHeight, 12.0f, fillHeight, 5.0f);
+        }
+    }
+    const float dB = level > 0.00001f ? juce::Decibels::gainToDecibels(level) : -100.0f;
+    g.setColour(ink);
+    g.setFont(juce::FontOptions(13.0f));
+    g.drawText(dB <= -99.0f ? "-inf dB" : juce::String(dB, 1) + " dB",
+               juce::Rectangle<float>(x - 18.0f, y + height + 9.0f, 74.0f, 26.0f),
+               juce::Justification::centred);
 }
 
 void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    auto r = getLocalBounds();
-    juce::ColourGradient gradient(juce::Colour(0xfff4faff), 0.0f, 72.0f,
-                                  juce::Colour(0xffd9eaff), 0.0f, static_cast<float>(getHeight()), false);
-    g.setGradientFill(gradient);
+    juce::ColourGradient background(juce::Colour(0xfff2f9ff), 0.0f, 80.0f,
+                                    juce::Colour(0xffd8e9fa), 0.0f, 460.0f, false);
+    g.setGradientFill(background);
     g.fillAll();
-    g.setColour(navy);
-    g.fillRect(r.removeFromTop(80));
 
-    const float scale = static_cast<float>(getWidth()) / 960.0f;
-    auto meter = [&](float x, float level, const juce::String& title)
-    {
-        const float y = 140.0f * scale;
-        const float h = 194.0f * scale;
-        const float w = 18.0f * scale;
-        g.setColour(juce::Colour(0xffb8cce0));
-        g.fillRoundedRectangle(x * scale, y, w, h, 7.0f);
-        const float frac = juce::jlimit(0.0f, 1.0f, level);
-        g.setColour(frac > 0.9f ? juce::Colour(0xffe5b348) : juce::Colour(0xff20cba0));
-        g.fillRoundedRectangle(x * scale, y + h * (1.0f - frac), w, h * frac, 6.0f);
-        g.setColour(ink);
-        g.setFont(juce::FontOptions(15.0f * scale));
-        g.drawText(title, juce::Rectangle<float>((x - 18) * scale, (y - 35.0f * scale), 56 * scale, 28 * scale),
-                   juce::Justification::centred);
-    };
-    meter(28.0f, inMeter, "IN");
-    meter(916.0f, outMeter, "OUT");
-    g.setColour(juce::Colour(0xffb8cee4));
-    g.drawVerticalLine(static_cast<int>(83 * scale), 115.0f * scale, 375.0f * scale);
-    g.drawVerticalLine(static_cast<int>(878 * scale), 115.0f * scale, 375.0f * scale);
+    const float sx = static_cast<float>(getWidth()) / 1024.0f;
+    const float sy = static_cast<float>(getHeight()) / 460.0f;
+    juce::Graphics::ScopedSaveState saved(g);
+    g.addTransform(juce::AffineTransform::scale(sx, sy));
+    g.setColour(navy);
+    g.fillRect(0.0f, 0.0f, 1024.0f, 80.0f);
+    g.setColour(blue);
+    juce::Path pulse;
+    pulse.startNewSubPath(20.0f, 40.0f);
+    pulse.lineTo(33.0f, 40.0f); pulse.lineTo(40.0f, 24.0f);
+    pulse.lineTo(47.0f, 55.0f); pulse.lineTo(54.0f, 33.0f);
+    pulse.lineTo(62.0f, 40.0f); pulse.lineTo(74.0f, 40.0f);
+    g.strokePath(pulse, juce::PathStrokeType(2.2f));
+    g.setColour(juce::Colour(0xff6886a6));
+    g.drawVerticalLine(205, 19.0f, 62.0f);
+    g.setColour(juce::Colour(0xff7893b1));
+    g.drawRoundedRectangle(428.0f, 16.0f, 218.0f, 48.0f, 23.0f, 1.4f);
+    g.setColour(juce::Colour(0xffadc3dc));
+    g.drawVerticalLine(88, 110.0f, 416.0f);
+    g.drawVerticalLine(935, 110.0f, 416.0f);
+    paintMeter(g, 37.0f, 157.0f, inMeter, "IN");
+    paintMeter(g, 962.0f, 157.0f, outMeter, "OUT");
+    g.setColour(juce::Colour(0xffb6d7f4).withAlpha(0.38f));
+    g.fillEllipse(397.0f, 121.0f, 232.0f, 232.0f);
 }
 
 void VoVoltAudioProcessorEditor::resized()
 {
-    const float sx = static_cast<float>(getWidth()) / 960.0f;
-    const float sy = static_cast<float>(getHeight()) / 430.0f;
+    const float sx = static_cast<float>(getWidth()) / 1024.0f;
+    const float sy = static_cast<float>(getHeight()) / 460.0f;
     auto place = [sx, sy](juce::Component& c, int x, int y, int w, int h)
     {
         c.setBounds(juce::roundToInt(x * sx), juce::roundToInt(y * sy),
                     juce::roundToInt(w * sx), juce::roundToInt(h * sy));
     };
-    place(heading, 30, 10, 225, 54);
-    place(subtitle, 255, 22, 170, 34);
-    place(bypass, 815, 20, 120, 42);
-    place(characterLabel, 125, 125, 265, 28);
-    for (int i = 0; i < 4; ++i) place(modes[static_cast<size_t>(i)], 113 + 74 * i, 166, 70, 44);
-    place(driveLabel, 432, 125, 100, 30);
-    place(drive, 397, 150, 170, 180);
-    place(toneLabel, 130, 265, 220, 28);
-    place(tone, 135, 300, 220, 75);
-    place(mixLabel, 625, 125, 205, 28);
-    place(mix, 625, 160, 205, 75);
-    place(outputLabel, 625, 265, 205, 28);
-    place(output, 625, 300, 205, 75);
+    place(heading, 84, 14, 160, 49);
+    place(subtitle, 225, 20, 194, 40);
+    place(presetName, 438, 19, 198, 40);
+    place(bypass, 827, 18, 159, 43);
+    place(characterLabel, 132, 137, 260, 35);
+    for (int i = 0; i < 4; ++i) place(modes[static_cast<size_t>(i)], 137 + 65 * i, 193, 64, 43);
+    place(drive, 399, 128, 225, 229);
+    place(driveLabel, 466, 223, 93, 30);
+    place(driveValue, 459, 255, 109, 46);
+    place(toneLabel, 135, 322, 220, 30);
+    place(tone, 133, 362, 310, 54);
+    place(mixLabel, 671, 137, 205, 35);
+    place(mix, 658, 190, 256, 54);
+    place(outputLabel, 666, 320, 220, 35);
+    place(output, 654, 363, 262, 54);
 }
 
 juce::AudioProcessorEditor* VoVoltAudioProcessor::createEditor()
