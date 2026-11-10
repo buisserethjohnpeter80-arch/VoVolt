@@ -1,40 +1,46 @@
-# VoVolt v0.1 | Vocal Saturation VST3
+# VoVolt DSP v0.4 | Vocal Saturation VST3
 
-Independent saturation plugin. **Not a MELOTHÉON module.**
+VoVolt is an independent C++20 / JUCE 8.0.8 saturation plugin, **not part of MELOTHÉON**.
 
-## Included
-- Soft, Tube, Tape and Hard nonlinear character modes
-- Drive, Tone, Mix, Output, Bypass
-- Mono/stereo processing and level meters
-- Fixed 4x oversampling, parameter smoothing, host latency reporting
-- JUCE APVTS state persistence and DAW automation
-- Simple light-blue UI inspired by the approved VoVolt mockup (not a pixel-perfect copy)
-- Windows GitHub Actions build, portable standalone DSP smoke test
+## What this release contains
+
+- Four *independent* original DSP character models: Soft, Hard (quadratic knee), Tube (asymmetric/envelope-responsive) and Tape (stateful magnetic-memory approximation).
+- All original v0.1 host parameter IDs, defaults and order maintained: `character`, `drive`, `tone`, `mix`, `output`, `bypass`.
+- **Unmodified** v0.1 approved light-blue UI (`PluginEditor.*`, `VoVoltLookAndFeel.h`).
+- Per-channel/per-character DSP state; drive/tone/output/mix/bypass smoothing; one-pole smoothed character weights for rapid switching.
+- Fixed 4x oversampling using JUCE's polyphase IIR, host-reported integer latency, preallocated aligned dry delay and DC removal on wet path.
+- Process blocks larger than the prepared block size via **chunking**, without realtime allocations.
+- JUCE APVTS DAW parameter automation and state recall, mono/stereo routing and level meters.
+- Nine standalone C++ DSP test groups, plus Windows GitHub Actions build and CTest.
 
 ## Build (Windows)
-Prerequisites: Git, CMake 3.22+, Visual Studio 2022 with C++ desktop workload, internet for first JUCE checkout.
+
+Prerequisites: Git, CMake 3.22+, Visual Studio 2022 with C++ desktop workload, and internet for initial JUCE checkout.
 
 ```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DVOVOLT_BUILD_TESTS=ON
 cmake --build build --config Release --parallel 4
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-VST3 bundle: `build/VoVolt_artefacts/Release/VST3/`.
-Copy the `.vst3` bundle into `C:\Program Files\Common Files\VST3`, then rescan in FL Studio.
+VST3 path: `build/VoVolt_artefacts/Release/VST3/`.
+Install the `.vst3` bundle to `C:\Program Files\Common Files\VST3`, then rescan in FL Studio.
+You can also use GitHub Actions: `.github/workflows/windows.yml` uploads the VST3 artifact after a successful build.
 
-## Important engineering status
-This is a **first functional source implementation**, not a certified commercial release. The code has not been built against JUCE in this environment. Run the Windows CI build and test it in FL Studio before distribution.
+## What is tested vs. untested
 
-### Known scope and limitations
-- Oversampling fixed at 4x. No selectable 1x/2x/8x yet.
-- No Vocal Focus, auto gain, A/B presets, harmonic analyzer or advanced panel yet.
-- The Tape mode is an original stateful waveshaper, **not** a measured analog tape emulation.
-- No loudness matching. Do not mistake output level for subjective sound quality.
-- The current wet/dry latency alignment uses integer host latency. Validate impulse timing and phase cancellation before production release.
-- Bypass is internally smoothed and latency compensated; it is not JUCE host hard-bypass.
-- Large host blocks beyond the prepared maximum are safely passed through unchanged; robust arbitrary block-size chunking is a future improvement.
-- GUI uses JUCE native components and a responsive layout; exact font/rendering varies by OS.
+**Actually tested in the supplied environment:** JUCE-independent DSP core, 9 groups, with GCC C++20 in both optimized and `-DNDEBUG` builds. Additional AddressSanitizer/UndefinedBehaviorSanitizer run is performed for core tests.
 
-## Muse handoff
-Upload this project to a **new VoVolt repository**, not the MELOTHÉON repository. Ask Muse to run Windows Actions, fix compile errors only, preserve audio and UI behavior, then test in FL Studio.
+**NOT tested here:** actual JUCE/VST3 compilation on Windows, sound quality in FL Studio, oversampler dry/wet latency impulse alignment, CPU under host load, extreme automation, and plugin scan/installation. Run Windows CI and host verification before any release claim.
+
+## Intentional limitations and decisions
+
+- v0.4 models are original perceptual *characters*, not replicas of Soundtoys or calibrated hardware. In particular Tape is a **simplified stateful model**, not a physical Jiles-Atherton/hysteresis simulation. Tube is not a component-level tube circuit simulation.
+- Hard threshold and knee are currently **internal curves linked to Drive**. No new UI controls or automation IDs were added.
+- Oversampling fixed at 4x, no mode selection yet. High-frequency aliasing measurements still required.
+- No automatic loudness matching, advanced spectral analyzer, or measured equal-loudness compensation.
+- `Drive=0` is mathematically transparent **inside each nonlinear character**. Tone filtering, the wet DC blocker and the oversampling path still act on wet audio. `Mix=0` or Bypass routes the latency-aligned dry signal instead.
+- When Bypass is enabled, Output is not applied to the bypassed dry path (same behaviour as v0.1).
+- Host latency is held constant by JUCE's `useIntegerLatency` option; verify with impulses/phase cancellation before shipping.
+
+Read `docs/V04_DSP_REPORT.md` for change notes and test checklist, and `docs/MUSE_HANDOFF.md` for the next CI and FL Studio validation steps.
