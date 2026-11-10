@@ -22,6 +22,9 @@ juce_add_plugin(VoVolt
     COPY_PLUGIN_AFTER_BUILD FALSE
 )
 
+# Generate the legacy umbrella header required by PluginProcessor.h and PluginEditor.h.
+juce_generate_juce_header(VoVolt)
+
 target_sources(VoVolt PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginProcessor.h
