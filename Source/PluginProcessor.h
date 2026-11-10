@@ -1,5 +1,6 @@
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include <atomic>
 #include <vector>
 #include "VoltCore.h"
@@ -33,14 +34,21 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
 
 private:
+    void processChunk(juce::AudioBuffer<float>&, int start, int count, int channels,
+                      float& inputPeak, float& outputPeak) noexcept;
+
     juce::LinearSmoothedValue<float> driveSmoothed, mixSmoothed, toneSmoothed, outputSmoothed, bypassSmoothed;
-    std::vector<float> tapeState, toneState;
+    std::vector<std::array<vovolt::ChannelState, 4>> characterState;
+    std::vector<float> toneState, dcPreviousInput, dcPreviousOutput;
     juce::AudioBuffer<float> dryCopy;
     int preparedBlockSize = 0;
     std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
     std::vector<std::vector<float>> dryDelay;
     size_t delayPosition = 0;
     int delaySize = 1;
-    float latencySamples = 0.0f;
+    float dcCoefficient = 0.0f;
+    vovolt::Character activeCharacter = vovolt::Character::tube;
+    std::array<float, 4> characterWeights { 0.0f, 1.0f, 0.0f, 0.0f };
+    float characterSmoothingCoeff = 0.0f;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VoVoltAudioProcessor)
 };
