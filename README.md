@@ -40,7 +40,7 @@ New controls are appended to the APVTS layout. Existing v0.1 parameter IDs, rang
 
 ## What is tested vs. untested
 
-**Actually tested in the supplied environment:** JUCE-independent DSP core, 10 groups, with GCC C++20 in both optimized and `-DNDEBUG` builds. Additional AddressSanitizer/UndefinedBehaviorSanitizer run is performed for core tests.
+**Actually tested in the supplied environment:** JUCE-independent DSP core, 12 groups, with GCC C++20 in both optimized and `-DNDEBUG` builds. Additional AddressSanitizer/UndefinedBehaviorSanitizer run is performed for core tests.
 
 **NOT tested here:** actual JUCE/VST3 compilation on Windows, sound quality in FL Studio, filter responses in the full processor, Auto Gain behavior on real program material, oversampler dry/wet latency impulse alignment, CPU under host load, extreme automation, and plugin scan/installation. Run Windows CI and host verification before any release claim.
 

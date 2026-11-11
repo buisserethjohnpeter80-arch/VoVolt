@@ -188,6 +188,72 @@ void testHarmonicContent()
     check(harmonic(Character::tube, 0.9f, 2) > 0.003, "Tube missing second harmonic");
 }
 
+void testHardOddHarmonicOrder()
+{
+    using namespace vovolt;
+    constexpr float fs = 192000.0f;
+    constexpr float pi = 3.14159265358979323846f;
+    constexpr int count = 19200; // exactly 100 cycles of a 1-kHz sine
+    auto harmonic = [](Character mode, float drive, int harmonicNumber)
+    {
+        ChannelState state;
+        state.prepare(fs);
+        constexpr float frequency = 1000.0f;
+        double re = 0.0, im = 0.0;
+        for (int i = 0; i < count; ++i)
+        {
+            const float phase = 2.0f * pi * frequency * static_cast<float>(i) / fs;
+            const float y = VoltCore::shape(0.45f * std::sin(phase), mode, drive, state);
+            re += y * std::cos(static_cast<double>(harmonicNumber) * phase);
+            im += y * std::sin(static_cast<double>(harmonicNumber) * phase);
+        }
+        return 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(count);
+    };
+    // Decapitator P (pentode) reference: odd harmonics dominate and decay.
+    const double h2 = harmonic(Character::hard, 0.9f, 2);
+    const double h3 = harmonic(Character::hard, 0.9f, 3);
+    const double h5 = harmonic(Character::hard, 0.9f, 5);
+    const double h7 = harmonic(Character::hard, 0.9f, 7);
+    check(h2 < 0.001, "Hard must stay odd-symmetric (no even harmonics)");
+    check(h3 > 0.05 && h3 > h5 && h5 > h7 && h7 > 0.01,
+          "Hard odd harmonics must dominate and decay (H3 > H5 > H7)");
+}
+
+float measureRms(vovolt::Character mode, float amp, float drive, float fs = 192000.0f)
+{
+    vovolt::ChannelState state;
+    state.prepare(fs);
+    constexpr int count = 19200;
+    constexpr float pi = 3.14159265358979323846f;
+    double sum = 0.0;
+    for (int i = 0; i < count; ++i)
+    {
+        const float x = amp * std::sin(2.0f * pi * 1000.0f * static_cast<float>(i) / fs);
+        const float y = vovolt::VoltCore::shape(x, mode, drive, state);
+        sum += static_cast<double>(y) * y;
+    }
+    return static_cast<float>(std::sqrt(sum / count));
+}
+
+void testHardLevelRelationship()
+{
+    using namespace vovolt;
+    // Regression guard for the 2026-11-10 finding: the FL report "HARD much
+    // quieter than SOFT" was caused by the OLD Soft curve (pre-calibration,
+    // +17 dB small-signal boost), NOT by Hard being weak. After the Soft
+    // calibration, Hard is the louder mode at high Drive, as hard clipping
+    // should be. No makeup gain belongs in Hard: adding +4.5..6 dB would
+    // make Hard ~+11 dB louder than Soft. Measured 2026-11-10 (1 kHz sine):
+    // drive 0.75, amp 0.45 -> Soft 0.2335, Hard 0.4598 (ratio 1.97).
+    for (float drive : {0.75f, 1.0f})
+    {
+        const float soft = measureRms(Character::soft, 0.45f, drive);
+        const float hard = measureRms(Character::hard, 0.45f, drive);
+        check(hard > soft, "Hard must be the louder mode at high Drive");
+        check(hard < 3.0f * soft, "Hard level must stay within sane bounds");
+    }
+}
+
 void testSegmentationIndependence()
 {
     using namespace vovolt;
@@ -232,8 +298,10 @@ int main()
         testTapeStateAndRate();
         testSegmentationIndependence();
         testHarmonicContent();
+        testHardOddHarmonicOrder();
+        testHardLevelRelationship();
         testInvalidInputRecovery();
-        std::cout << "VoVolt DSP core v0.5-dev: 10 test groups passed\n";
+        std::cout << "VoVolt DSP core v0.5-dev: 12 test groups passed\n";
         return 0;
     }
     catch (const std::exception& e)
