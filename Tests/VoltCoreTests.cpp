@@ -321,6 +321,52 @@ void testTubeSmallSignalGain()
     }
 }
 
+void testTubeThdCurve()
+{
+    using namespace vovolt;
+    // Culture Vulture anchors (published specs / Sound on Sound review):
+    // THD 0.2% at the cleanest setting (bias 0.25-0.3 mA), distortion up to
+    // ~99.9% overdriven. Our own triode must start subtle and grow smoothly.
+    // Measured 2026-11-11 (1 kHz sine, amp 0.45, dynamic envelope):
+    // Drive 0.05 -> 0.34%, 0.10 -> 0.86%, 0.25 -> 3.57%, 0.50 -> 12.35%,
+    // 0.75 -> 25.38%, 1.00 -> 39.90%.
+    constexpr float fs = 192000.0f;
+    constexpr float pi = 3.14159265358979323846f;
+    constexpr int count = 19200; // exactly 100 cycles of a 1-kHz sine
+    auto harmonic = [](float drive, int harmonicNumber)
+    {
+        ChannelState state;
+        state.prepare(fs);
+        constexpr float frequency = 1000.0f;
+        for (int i = 0; i < count; ++i) // warm the envelope up first
+            VoltCore::shape(0.45f * std::sin(2.0f * pi * frequency * static_cast<float>(i) / fs),
+                            Character::tube, drive, state);
+        double re = 0.0, im = 0.0;
+        for (int i = 0; i < count; ++i)
+        {
+            const float phase = 2.0f * pi * frequency * static_cast<float>(i) / fs;
+            const float y = VoltCore::shape(0.45f * std::sin(phase), Character::tube, drive, state);
+            re += y * std::cos(static_cast<double>(harmonicNumber) * phase);
+            im += y * std::sin(static_cast<double>(harmonicNumber) * phase);
+        }
+        return 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(count);
+    };
+    auto thd = [&](float drive)
+    {
+        const double h1 = harmonic(drive, 1);
+        double sum = 0.0;
+        for (int h = 2; h <= 6; ++h)
+        {
+            const double m = harmonic(drive, h);
+            sum += m * m;
+        }
+        return 100.0 * std::sqrt(sum) / h1;
+    };
+    check(thd(0.05f) < 1.0, "Tube must start subtle (THD < 1% at Drive 0.05)");
+    check(thd(0.10f) < 2.0, "Tube THD must stay subtle at Drive 0.10");
+    check(thd(1.0f) > 30.0, "Tube must reach heavy distortion at Drive 1.0");
+}
+
 void testSegmentationIndependence()
 {
     using namespace vovolt;
@@ -370,8 +416,9 @@ int main()
         testTubeEvenHarmonicOrder();
         testTubeLevelRelationship();
         testTubeSmallSignalGain();
+        testTubeThdCurve();
         testInvalidInputRecovery();
-        std::cout << "VoVolt DSP core v0.5-dev: 15 test groups passed\n";
+        std::cout << "VoVolt DSP core v0.5-dev: 16 test groups passed\n";
         return 0;
     }
     catch (const std::exception& e)

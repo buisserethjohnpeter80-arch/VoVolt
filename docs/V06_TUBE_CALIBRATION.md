@@ -61,6 +61,50 @@ Koren prototype, dynamic (bias shift on), 1 kHz sine, amp 0.45, fs 192 kHz:
 - Small-signal gain: 0.85 at Drive 0.5, 1.12 at Drive 1.0 (near unity).
 - Full-scale input (amp 1.0, Drive 1.0): RMS 0.485, peak 0.86 — bounded.
 
+## THD-vs-Drive curve vs the real Culture Vulture (2026-11-11)
+
+Measured on the real `VoltCore` TUBE (1 kHz sine, amp 0.45, dynamic envelope):
+
+| Drive | THD | H2 | H3 | H4 |
+|---|---|---|---|---|
+| 0.05 | 0.34% | 0.3% | 0.0% | 0.0% |
+| 0.10 | 0.86% | 0.9% | 0.0% | 0.1% |
+| 0.15 | 1.56% | 1.5% | 0.0% | 0.1% |
+| 0.25 | 3.57% | 3.5% | 0.1% | 0.4% |
+| 0.50 | 12.35% | 12.2% | 0.1% | 2.0% |
+| 0.75 | 25.38% | 24.8% | 1.2% | 5.1% |
+| 1.00 | 39.90% | 38.5% | 3.4% | 9.3% |
+
+Published Culture Vulture anchors (Sound on Sound review, Thermionic
+specs): THD **0.2% at the cleanest setting** (bias 0.25–0.3 mA),
+distortion up to **~99.9%** overdriven; "normal" bias 0.2–0.4 mA is a
+subtle, tape-like effect. Our curve starts at 0.34% (same order as 0.2%),
+stays subtle below Drive 0.15, and grows smoothly to 40% at maximum —
+the right shape in the vocal range (Drive 0.25–0.75). The extreme top
+(99.9%) belongs to the CV's Overdrive switch (+20 dB); VoVolt's Punish
+is 3.5x, a known gap (global decision, not changed here). Locked in by
+`testTubeThdCurve` (16 test groups total).
+
+## Correction: the standard Culture Vulture has NO transformers
+
+The standard Culture Vulture is EF86 input → 6AS6 distortion valve →
+5963 (12AU7) output, unbalanced I/O, frequency response ±1.5 dB over
+50 Hz–15 kHz — nearly flat. Only the MV (mastering) version has
+transformer-balanced I/O. So TUBE needs no transformer stage; the
+character lives in the 6AS6 triode curve, the bias, and the drive law.
+
+## The 6AS6 question
+
+No published Koren parameters exist for the 6AS6/5725 (Koren's table
+covers 12AX7, 12AU7, 6L6GC, EL34, ...). Koren's own method for a new
+tube is to fit the equations to its triode-mode datasheet curves
+(screen tied to plate); the Sylvania 1951 data gives only two
+operating points, not full curves, so no honest fit is possible from
+available data. The 12AX7 Koren stays as the triode core — the right
+physics family, validated by the THD curve matching the CV's published
+anchors above. If 6AS6 triode-mode curves surface, the constants can
+be refitted without changing the structure.
+
 ## Tests added (3 groups, 15 total)
 
 - `testTubeEvenHarmonicOrder`: H2 > H3 at Drive 0.25/0.5/0.75/0.9/1.0;

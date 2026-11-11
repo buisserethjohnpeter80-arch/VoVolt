@@ -29,7 +29,7 @@ VoVolt uses the broad workflow concepts of professional saturation processors as
 
 ## Validation status
 
-- Standalone nonlinear core regression: 15 test groups pass with GCC C++20 optimized build.
+- Standalone nonlinear core regression: 16 test groups pass with GCC C++20 optimized build.
 - Full JUCE processor and editor compilation: not run in this environment because JUCE is fetched by CMake and no local JUCE checkout is available.
 - Windows VST3, FL Studio listening, filter response plots, stereo correlation, Auto Gain pumping, latency, CPU and automation stress: not yet validated.
 
