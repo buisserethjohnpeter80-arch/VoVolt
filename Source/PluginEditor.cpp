@@ -209,11 +209,13 @@ void VoVoltAudioProcessorEditor::paintVuMeter(juce::Graphics& g, float x, float 
     // vocal hits the saturation circuit, which is what the Drive knob
     // reacts to. 0 VU = -18 dBFS (studio standard). Ballistics come from
     // the editor timer (fast attack, slow release), so the needle rides
-    // the body of the vocal instead of its peaks. The numeric dB readout
-    // sits under the face for exact staging.
+    // the body of the vocal instead of its peaks. Only four scale numbers
+    // are labelled (-20, -10, 0, +3), placed OUTSIDE the arc so they
+    // never collide; the rest are plain ticks. "VU" sits bottom left and
+    // the exact input level bottom right, inside the face.
     const float cx = x + w * 0.5f;
-    const float pivotY = y + h - 4.0f;
-    const float radius = h - 26.0f;
+    const float pivotY = y + h - 2.0f;
+    const float radius = 64.0f;
 
     g.setColour(juce::Colour(0xfff6ead0));
     g.fillRoundedRectangle(x, y, w, h, 8.0f);
@@ -254,25 +256,32 @@ void VoVoltAudioProcessorEditor::paintVuMeter(juce::Graphics& g, float x, float 
     g.setColour(juce::Colour(0xffc8102e));
     g.strokePath(redArc, juce::PathStrokeType(3.0f));
 
-    // Ticks + numbers.
-    const float ticks[] = { -20.0f, -10.0f, -7.0f, -3.0f, 0.0f, 3.0f };
+    // Minor ticks (no labels): -15, -7, -3, -1, +1, +2.
+    const float minorTicks[] = { -15.0f, -7.0f, -3.0f, -1.0f, 1.0f, 2.0f };
+    for (float vu : minorTicks)
+    {
+        const auto outer = pointOnArc(vu, radius);
+        const auto inner = pointOnArc(vu, radius - 7.0f);
+        g.setColour(ink);
+        g.drawLine(inner.x, inner.y, outer.x, outer.y, 1.2f);
+    }
+
+    // Major ticks + numbers, OUTSIDE the arc so they never collide.
+    const float majorTicks[] = { -20.0f, -10.0f, 0.0f, 3.0f };
     g.setFont(juce::FontOptions(11.0f));
-    for (float vu : ticks)
+    for (float vu : majorTicks)
     {
         const auto outer = pointOnArc(vu, radius);
         const auto inner = pointOnArc(vu, radius - 9.0f);
         g.setColour(vu >= 0.0f ? juce::Colour(0xffc8102e) : ink);
         g.drawLine(inner.x, inner.y, outer.x, outer.y, 1.4f);
-        const auto labelPos = pointOnArc(vu, radius - 21.0f);
+        // "+3" sits one step further out, so its glyphs never touch "0".
+        const auto labelPos = pointOnArc(vu, radius + (vu > 0.0f ? 18.0f : 10.0f));
         const juce::String text = vu > 0.0f ? "+" + juce::String(static_cast<int>(vu))
                                              : juce::String(static_cast<int>(vu));
-        g.drawText(text, juce::Rectangle<float>(labelPos.x - 14.0f, labelPos.y - 7.0f, 28.0f, 14.0f),
+        g.drawText(text, juce::Rectangle<float>(labelPos.x - 13.0f, labelPos.y - 7.0f, 26.0f, 14.0f),
                    juce::Justification::centred);
     }
-
-    g.setColour(ink);
-    g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
-    g.drawText("VU", juce::Rectangle<float>(x, y + 5.0f, w, 16.0f), juce::Justification::centred);
 
     // Needle.
     const float dB = level > 0.00001f ? juce::Decibels::gainToDecibels(level) : -100.0f;
@@ -284,12 +293,15 @@ void VoVoltAudioProcessorEditor::paintVuMeter(juce::Graphics& g, float x, float 
     g.drawLine(cx, pivotY, tip.x, tip.y, 2.4f);
     g.fillEllipse(cx - 4.5f, pivotY - 4.5f, 9.0f, 9.0f);
 
-    // Numeric input level under the face.
+    // Face captions: "VU" bottom left, exact input level bottom right.
     g.setColour(ink);
-    g.setFont(juce::FontOptions(13.0f));
+    g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    g.drawText("VU", juce::Rectangle<float>(x + 8.0f, y + h - 18.0f, 40.0f, 15.0f),
+               juce::Justification::centredLeft);
+    g.setFont(juce::FontOptions(12.0f));
     g.drawText(dB <= -99.0f ? "IN  -inf dB" : "IN  " + juce::String(dB, 1) + " dB",
-               juce::Rectangle<float>(x, y + h + 5.0f, w, 16.0f),
-               juce::Justification::centred);
+               juce::Rectangle<float>(x + w - 108.0f, y + h - 18.0f, 100.0f, 15.0f),
+               juce::Justification::centredRight);
 }
 
 void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
@@ -321,7 +333,7 @@ void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
     g.drawVerticalLine(935, 110.0f, 416.0f);
     paintMeter(g, 37.0f, 157.0f, inMeter, "IN");
     paintMeter(g, 962.0f, 157.0f, outMeter, "OUT");
-    paintVuMeter(g, 396.0f, 362.0f, 256.0f, 76.0f, vuLevel);
+    paintVuMeter(g, 396.0f, 358.0f, 256.0f, 88.0f, vuLevel);
     g.setColour(juce::Colour(0xffb6d7f4).withAlpha(0.38f));
     g.fillEllipse(397.0f, 121.0f, 232.0f, 232.0f);
 }
