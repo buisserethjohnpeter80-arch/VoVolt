@@ -254,6 +254,73 @@ void testHardLevelRelationship()
     }
 }
 
+void testTubeEvenHarmonicOrder()
+{
+    using namespace vovolt;
+    constexpr float fs = 192000.0f;
+    constexpr float pi = 3.14159265358979323846f;
+    constexpr int count = 19200; // exactly 100 cycles of a 1-kHz sine
+    auto harmonic = [](Character mode, float drive, int harmonicNumber)
+    {
+        ChannelState state;
+        state.prepare(fs);
+        constexpr float frequency = 1000.0f;
+        // Warm the envelope up first, then analyze a steady-state window.
+        for (int i = 0; i < count; ++i)
+            VoltCore::shape(0.45f * std::sin(2.0f * pi * frequency * static_cast<float>(i) / fs),
+                            mode, drive, state);
+        double re = 0.0, im = 0.0;
+        for (int i = 0; i < count; ++i)
+        {
+            const float phase = 2.0f * pi * frequency * static_cast<float>(i) / fs;
+            const float y = VoltCore::shape(0.45f * std::sin(phase), mode, drive, state);
+            re += y * std::cos(static_cast<double>(harmonicNumber) * phase);
+            im += y * std::sin(static_cast<double>(harmonicNumber) * phase);
+        }
+        return 2.0 * std::sqrt(re * re + im * im) / static_cast<double>(count);
+    };
+    // Decapitator T (triode) reference: even harmonics dominate, 2nd strongest.
+    for (float drive : {0.25f, 0.5f, 0.75f, 0.9f, 1.0f})
+    {
+        const double h2 = harmonic(Character::tube, drive, 2);
+        const double h3 = harmonic(Character::tube, drive, 3);
+        check(h2 > h3, "Tube 2nd harmonic must dominate the 3rd (triode)");
+    }
+    check(harmonic(Character::tube, 0.5f, 2) > 0.01, "Tube 2nd harmonic missing at moderate Drive");
+    check(harmonic(Character::tube, 0.75f, 4) > 0.001, "Tube 4th harmonic missing");
+}
+
+void testTubeLevelRelationship()
+{
+    using namespace vovolt;
+    // Regression guard for the 2026-11-11 finding: the old biased-tanh Tube
+    // was +10.9 dB louder than Soft at Drive 0.75 (RMS 0.82 vs 0.23) and its
+    // output exceeded full scale (RMS 1.10 at Drive 1.0). The Koren triode
+    // stays level-matched with Soft. Measured 2026-11-11 (1 kHz sine):
+    // drive 0.75, amp 0.45 -> Soft 0.2335, Tube 0.2358 (ratio 1.01);
+    // drive 1.0 -> Soft 0.1790, Tube 0.2676 (ratio 1.50).
+    for (float drive : {0.75f, 1.0f})
+    {
+        const float soft = measureRms(Character::soft, 0.45f, drive);
+        const float tube = measureRms(Character::tube, 0.45f, drive);
+        check(tube > 0.5f * soft && tube < 2.0f * soft,
+              "Tube level must stay within 0.5x..2.0x of Soft");
+    }
+}
+
+void testTubeSmallSignalGain()
+{
+    using namespace vovolt;
+    // The old Tube boosted quiet material (2.62x at Drive 0.5); the Koren
+    // triode keeps small-signal gain near unity. Measured 2026-11-11:
+    // 0.85 at Drive 0.5, 1.12 at Drive 1.0.
+    for (float drive : {0.5f, 1.0f})
+    {
+        const float gain = measure(Character::tube, 0.001f, drive) / 0.001f;
+        check(gain > 0.7f && gain < 1.2f, "Tube small-signal gain must stay near unity");
+    }
+}
+
 void testSegmentationIndependence()
 {
     using namespace vovolt;
@@ -300,8 +367,11 @@ int main()
         testHarmonicContent();
         testHardOddHarmonicOrder();
         testHardLevelRelationship();
+        testTubeEvenHarmonicOrder();
+        testTubeLevelRelationship();
+        testTubeSmallSignalGain();
         testInvalidInputRecovery();
-        std::cout << "VoVolt DSP core v0.5-dev: 12 test groups passed\n";
+        std::cout << "VoVolt DSP core v0.5-dev: 15 test groups passed\n";
         return 0;
     }
     catch (const std::exception& e)

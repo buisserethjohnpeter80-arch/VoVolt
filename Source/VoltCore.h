@@ -23,7 +23,7 @@ struct ChannelState
     {
         const float rate = std::max(8000.0f, oversampledRate);
         tubeAttackCoeff = 1.0f - std::exp(-1.0f / (0.004f * rate));
-        tubeReleaseCoeff = 1.0f - std::exp(-1.0f / (0.060f * rate));
+        tubeReleaseCoeff = 1.0f - std::exp(-1.0f / (0.100f * rate));
         tapeLowpassCoeff = 1.0f - std::exp(-2.0f * 3.14159265358979323846f * 5500.0f / rate);
         tapeMemoryCoeff = 1.0f - std::exp(-1.0f / (0.00045f * rate));
         reset();
@@ -37,8 +37,24 @@ struct ChannelState
     }
 };
 
-// Original VoVolt character models. Tube and Tape are *inspired by* analog
-// behaviour; neither is a component-level or hardware-measured emulation.
+// Original VoVolt character models. Tube is a Koren 12AX7 triode model
+// (see docs/V06_TUBE_CALIBRATION.md); Tape is *inspired by* analog
+// behaviour, not a component-level or hardware-measured emulation.
+
+// Koren triode plate current (12AX7: mu=100, Ex=1.4, Kg1=1060, Kp=600,
+// Kvb=300, Vp=250 V). E1 is always >= 0 here, so (1 + sgn E1) = 2.
+inline float korenPlateCurrent(float gridVolts) noexcept
+{
+    const float root = std::sqrt(300.0f + 250.0f * 250.0f);
+    const float arg = std::clamp(600.0f * (0.01f + gridVolts / root), -50.0f, 50.0f);
+    const float e1 = (250.0f / 600.0f) * std::log(1.0f + std::exp(arg));
+    return 2.0f * std::pow(e1, 1.4f) / 1060.0f;
+}
+
+// Plate current at the -2 V operating point; subtracted so zero input
+// gives zero output.
+const float kTubeIdleCurrent = korenPlateCurrent(-2.0f);
+
 struct VoltCore
 {
     static float shape(float x, Character mode, float drive, ChannelState& state) noexcept
@@ -92,16 +108,18 @@ struct VoltCore
             }
             case Character::tube:
             {
-                // Signal-dependent bias, asymmetric transfer and envelope memory.
+                // Koren 12AX7 triode: 3/2-law curvature gives even-harmonic
+                // dominance (H2 > H3); the grid-current bias shift makes the
+                // operating point move with the signal, so the triode breathes.
                 const float level = std::abs(x);
                 const float coefficient = level > state.tubeEnvelope
                     ? state.tubeAttackCoeff : state.tubeReleaseCoeff;
                 state.tubeEnvelope += coefficient * (level - state.tubeEnvelope);
-                const float bias = d * (0.14f + 0.12f * std::min(state.tubeEnvelope, 1.5f));
-                const float gain = 1.0f + 6.0f * d;
-                const float offset = std::tanh(bias);
-                const float scale = std::max(0.1f, std::tanh(gain + bias) - offset);
-                const float saturated = (std::tanh(gain * x + bias) - offset) / scale;
+                const float bias = -2.0f - 0.8f * std::min(state.tubeEnvelope, 1.5f);
+                const float grid = bias + (2.0f + 6.0f * d) * x;
+                const float plate = (korenPlateCurrent(grid) - kTubeIdleCurrent) / 0.012f;
+                // Supply-rail soft ceiling: bounds loud inputs without a hard clip.
+                const float saturated = plate / (1.0f + std::abs(plate) / 1.2f);
                 return x + d * (saturated - x);
             }
             case Character::tape:
