@@ -148,6 +148,10 @@ void VoVoltAudioProcessorEditor::timerCallback()
 {
     inMeter = juce::jmax(processor.inputLevel.load(std::memory_order_relaxed), inMeter * 0.87f);
     outMeter = juce::jmax(processor.outputLevel.load(std::memory_order_relaxed), outMeter * 0.87f);
+    // VU ballistics for the needle: fast attack, slow release, so it rides
+    // the body of the vocal instead of its peaks (30 Hz timer).
+    const float target = processor.inputLevel.load(std::memory_order_relaxed);
+    vuLevel += (target - vuLevel) * (target > vuLevel ? 0.4f : 0.12f);
     if (auto* parameter = processor.parameters.getRawParameterValue("character"))
     {
         const int selected = juce::jlimit(0, 3, static_cast<int>(std::lround(parameter->load())));
@@ -199,6 +203,95 @@ void VoVoltAudioProcessorEditor::paintMeter(juce::Graphics& g, float x, float y,
                juce::Justification::centred);
 }
 
+void VoVoltAudioProcessorEditor::paintVuMeter(juce::Graphics& g, float x, float y, float w, float h, float level) const
+{
+    // Classic VU meter on the INPUT level: the needle shows how hard the
+    // vocal hits the saturation circuit, which is what the Drive knob
+    // reacts to. 0 VU = -18 dBFS (studio standard). Ballistics come from
+    // the editor timer (fast attack, slow release), so the needle rides
+    // the body of the vocal instead of its peaks. The numeric dB readout
+    // sits under the face for exact staging.
+    const float cx = x + w * 0.5f;
+    const float pivotY = y + h - 4.0f;
+    const float radius = h - 26.0f;
+
+    g.setColour(juce::Colour(0xfff6ead0));
+    g.fillRoundedRectangle(x, y, w, h, 8.0f);
+    g.setColour(juce::Colour(0xff8a7a5a));
+    g.drawRoundedRectangle(x, y, w, h, 8.0f, 1.2f);
+
+    const auto toAngle = [](float vu)
+    {
+        return juce::degreesToRadians(-42.0f + (vu + 20.0f) * (84.0f / 23.0f));
+    };
+    const auto pointOnArc = [&](float vu, float r)
+    {
+        const float a = toAngle(vu);
+        return juce::Point<float>(cx + std::sin(a) * r, pivotY - std::cos(a) * r);
+    };
+
+    // Scale arc (-20 to +3 VU).
+    juce::Path arc;
+    bool first = true;
+    for (float vu = -20.0f; vu <= 3.0f; vu += 0.5f)
+    {
+        const auto p = pointOnArc(vu, radius);
+        if (first) { arc.startNewSubPath(p); first = false; }
+        else arc.lineTo(p);
+    }
+    g.setColour(ink);
+    g.strokePath(arc, juce::PathStrokeType(1.4f));
+
+    // Red zone (0 to +3 VU).
+    juce::Path redArc;
+    first = true;
+    for (float vu = 0.0f; vu <= 3.0f; vu += 0.25f)
+    {
+        const auto p = pointOnArc(vu, radius);
+        if (first) { redArc.startNewSubPath(p); first = false; }
+        else redArc.lineTo(p);
+    }
+    g.setColour(juce::Colour(0xffc8102e));
+    g.strokePath(redArc, juce::PathStrokeType(3.0f));
+
+    // Ticks + numbers.
+    const float ticks[] = { -20.0f, -10.0f, -7.0f, -3.0f, 0.0f, 3.0f };
+    g.setFont(juce::FontOptions(11.0f));
+    for (float vu : ticks)
+    {
+        const auto outer = pointOnArc(vu, radius);
+        const auto inner = pointOnArc(vu, radius - 9.0f);
+        g.setColour(vu >= 0.0f ? juce::Colour(0xffc8102e) : ink);
+        g.drawLine(inner.x, inner.y, outer.x, outer.y, 1.4f);
+        const auto labelPos = pointOnArc(vu, radius - 21.0f);
+        const juce::String text = vu > 0.0f ? "+" + juce::String(static_cast<int>(vu))
+                                             : juce::String(static_cast<int>(vu));
+        g.drawText(text, juce::Rectangle<float>(labelPos.x - 14.0f, labelPos.y - 7.0f, 28.0f, 14.0f),
+                   juce::Justification::centred);
+    }
+
+    g.setColour(ink);
+    g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+    g.drawText("VU", juce::Rectangle<float>(x, y + 5.0f, w, 16.0f), juce::Justification::centred);
+
+    // Needle.
+    const float dB = level > 0.00001f ? juce::Decibels::gainToDecibels(level) : -100.0f;
+    const float vu = juce::jlimit(-20.0f, 3.0f, dB + 18.0f);
+    const float angle = toAngle(vu);
+    const auto tip = juce::Point<float>(cx + std::sin(angle) * (radius + 4.0f),
+                                        pivotY - std::cos(angle) * (radius + 4.0f));
+    g.setColour(juce::Colour(0xff1a1a1a));
+    g.drawLine(cx, pivotY, tip.x, tip.y, 2.4f);
+    g.fillEllipse(cx - 4.5f, pivotY - 4.5f, 9.0f, 9.0f);
+
+    // Numeric input level under the face.
+    g.setColour(ink);
+    g.setFont(juce::FontOptions(13.0f));
+    g.drawText(dB <= -99.0f ? "IN  -inf dB" : "IN  " + juce::String(dB, 1) + " dB",
+               juce::Rectangle<float>(x, y + h + 5.0f, w, 16.0f),
+               juce::Justification::centred);
+}
+
 void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
 {
     juce::ColourGradient background(juce::Colour(0xfff2f9ff), 0.0f, 80.0f,
@@ -228,6 +321,7 @@ void VoVoltAudioProcessorEditor::paint(juce::Graphics& g)
     g.drawVerticalLine(935, 110.0f, 416.0f);
     paintMeter(g, 37.0f, 157.0f, inMeter, "IN");
     paintMeter(g, 962.0f, 157.0f, outMeter, "OUT");
+    paintVuMeter(g, 396.0f, 362.0f, 256.0f, 76.0f, vuLevel);
     g.setColour(juce::Colour(0xffb6d7f4).withAlpha(0.38f));
     g.fillEllipse(397.0f, 121.0f, 232.0f, 232.0f);
 }

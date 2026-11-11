@@ -15,6 +15,7 @@ private:
     void timerCallback() override;
     void setCharacter(int index);
     void paintMeter(juce::Graphics&, float x, float y, float level, const juce::String& label) const;
+    void paintVuMeter(juce::Graphics&, float x, float y, float w, float h, float level) const;
     VoVoltAudioProcessor& processor;
     VoVoltLookAndFeel lookAndFeel;
     juce::Slider drive, tone, mix, output, lowCut, thump, highCut;
@@ -27,6 +28,6 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bypassAttach;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> lowCutAttach, thumpAttach, highCutAttach;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> punishAttach, steepAttach, autoGainAttach;
-    float inMeter = 0.0f, outMeter = 0.0f;
+    float inMeter = 0.0f, outMeter = 0.0f, vuLevel = 0.0f;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VoVoltAudioProcessorEditor)
 };
